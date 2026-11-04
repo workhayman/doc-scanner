@@ -239,8 +239,8 @@ const Scanner = (() => {
   function lumaSampler(canvas) {
     const W = canvas.width, H = canvas.height;
     const d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
-    const L = new Float32Array(W * H);
-    for (let i = 0, j = 0; i < L.length; i++, j += 4) L[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+    const L = new Uint8Array(W * H);
+    for (let i = 0, j = 0; i < L.length; i++, j += 4) L[i] = (77 * d[j] + 150 * d[j + 1] + 29 * d[j + 2]) >> 8;
     return {
       W, H,
       at(x, y) {
@@ -373,7 +373,7 @@ const Scanner = (() => {
   }
 
   /* Crop + flatten the quad into a straight rectangle (bicubic, so text stays crisp). */
-  function warp(canvas, corners, maxSide = Imaging.MAX_SIDE) {
+  function warp(canvas, corners, maxSide = Imaging.PAGE_SIDE) {
     const wTop = dist(corners.tl, corners.tr), wBot = dist(corners.bl, corners.br);
     const hL = dist(corners.tl, corners.bl), hR = dist(corners.tr, corners.br);
     let w = Math.max(wTop, wBot), h = Math.max(hL, hR);
@@ -499,59 +499,126 @@ const Scanner = (() => {
     try { cv.divide(src, bg, dst, 255); } finally { bg.delete(); }
   }
 
-  /* Contrast curve (black point lo, white point hi) then unsharp mask. */
-  function finish(mat, lo, hi, amount) {
-    const a = 255 / (hi - lo);
-    mat.convertTo(mat, -1, a, -lo * a);
-    if (amount > 0) {
-      const blur = new cv.Mat();
-      try {
-        const sigma = Math.max(0.8, Math.max(mat.cols, mat.rows) / 1800);
-        cv.GaussianBlur(mat, blur, new cv.Size(0, 0), sigma);
-        cv.addWeighted(mat, 1 + amount, blur, -amount, 0, mat);
-      } finally { blur.delete(); }
-    }
+  /* Make low-resolution pages bigger before the contrast curve, so letter
+     edges come out smooth instead of jagged. Returns the scale used. */
+  const TEXT_SIDE = 2600;   // long side a page should have for crisp 10pt text
+  function upscaleForText(mat) {
+    const long = Math.max(mat.cols, mat.rows);
+    if (long >= TEXT_SIDE * 0.92) return 1;
+    const k = Math.min(2, TEXT_SIDE / long);
+    cv.resize(mat, mat, new cv.Size(Math.round(mat.cols * k), Math.round(mat.rows * k)), 0, 0, cv.INTER_CUBIC);
+    return k;
   }
 
-  /* Apply a filter in place: 'original' | 'enhance' | 'grey' | 'bw'. */
+  /* Unsharp mask tuned to the width of a text stroke. */
+  function sharpen(mat, amount) {
+    const blur = new cv.Mat();
+    try {
+      const sigma = Math.max(1, Math.max(mat.cols, mat.rows) / 2200);
+      cv.GaussianBlur(mat, blur, new cv.Size(0, 0), sigma);
+      cv.addWeighted(mat, 1 + amount, blur, -amount, 0, mat);
+    } finally { blur.delete(); }
+  }
+
+  /* Tone curve for text on a lighting-corrected page (paper ≈ 255):
+     everything brighter than `white` becomes pure paper white, and the
+     curve bends (gamma) so grey, slightly blurred strokes turn near-black. */
+  function textCurve(mat, black, white, gamma) {
+    const lut = new Uint8Array(256);
+    for (let v = 0; v < 256; v++) {
+      const t = Math.max(0, Math.min(1, (v - black) / (white - black)));
+      lut[v] = Math.round(255 * Math.pow(t, gamma));
+    }
+    const d = mat.data;
+    for (let i = 0; i < d.length; i++) d[i] = lut[d[i]];
+  }
+
+  /* Typical brightness of the ink cores. Most non-paper pixels are the soft
+     edges of letters, so take a low percentile of them, not the median. */
+  function darkLevel(gray) {
+    const hist = new Uint32Array(256), d = gray.data;
+    for (let i = 0; i < d.length; i += 3) hist[d[i]]++;
+    let n = 0;
+    for (let v = 0; v < 230; v++) n += hist[v];
+    if (n < 50) return 60;
+    let acc = 0;
+    for (let v = 0; v < 230; v++) { acc += hist[v]; if (acc >= n * 0.15) return v; }
+    return 60;
+  }
+
+  /* Apply a filter. 'original' | 'enhance' | 'grey' | 'bw'.
+     Returns the canvas holding the result: the same canvas, or a new,
+     larger one when a small page was upscaled for sharper text. */
   function applyFilter(canvas, filter) {
     if (filter === 'original' || !ready) return canvas;
     const src = cv.imread(canvas);
     const work = new cv.Mat();
+    let out = canvas;
+    const show = (mat) => {
+      if (mat.cols !== canvas.width || mat.rows !== canvas.height) out = Imaging.createCanvas(mat.cols, mat.rows);
+      cv.imshow(out, mat);
+    };
     try {
       if (filter === 'enhance') {
-        // Colour scan: even white paper, dark crisp text, colours kept.
+        // Colour scan: even white paper, black crisp text, colours kept.
         cv.cvtColor(src, work, cv.COLOR_RGBA2RGB);
+        src.delete();
         flattenLighting(work, work);
-        finish(work, 25, 238, 0.8);
-        cv.imshow(canvas, work);
+        upscaleForText(work);
+        sharpen(work, 1.1);
+        textCurve(work, 45, 220, 1.7);
+        show(work);
       } else if (filter === 'grey') {
         cv.cvtColor(src, work, cv.COLOR_RGBA2GRAY);
+        src.delete();
         flattenLighting(work, work);
-        finish(work, 20, 240, 0.7);
-        cv.imshow(canvas, work);
+        upscaleForText(work);
+        sharpen(work, 1.1);
+        textCurve(work, 40, 222, 1.75);
+        show(work);
       } else if (filter === 'bw') {
-        const out = new cv.Mat();
+        const bin = new cv.Mat();
         try {
           cv.cvtColor(src, work, cv.COLOR_RGBA2GRAY);
+          src.delete();
           flattenLighting(work, work);
-          cv.GaussianBlur(work, work, new cv.Size(3, 3), 0);
-          let block = Math.round(Math.max(canvas.width, canvas.height) / 40);
-          block = Math.min(75, Math.max(15, block)) | 1;       // odd, 15..75
-          cv.adaptiveThreshold(work, out, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, block, 14);
-          cv.medianBlur(out, out, 3);                          // remove speckles
-          cv.imshow(canvas, out);
-        } finally { out.delete(); }
+          upscaleForText(work);
+          sharpen(work, 0.6);
+          // The lighting is already even (paper = 255), so one threshold for
+          // the whole page works: halfway between the ink and the paper.
+          // Cutting at the middle of the soft letter edge keeps strokes at
+          // their true weight instead of making them bold.
+          const ink = darkLevel(work);
+          const t = Math.max(100, Math.min(200, Math.round((ink + 255) / 2) - 8));
+          cv.threshold(work, bin, t, 255, cv.THRESH_BINARY);
+          cv.medianBlur(bin, bin, 3);                          // remove speckles
+          show(bin);
+        } finally { bin.delete(); }
       }
     } finally {
-      src.delete(); work.delete();
+      if (!src.isDeleted()) src.delete();
+      work.delete();
     }
-    return canvas;
+    return out;
+  }
+
+  /* Sharpness of an image (variance of the Laplacian): higher = sharper.
+     Used to pick the best frame of a burst. */
+  function sharpness(canvas) {
+    if (!ready) return 0;
+    const src = cv.imread(canvas), gray = new cv.Mat(), lap = new cv.Mat();
+    const mean = new cv.Mat(), std = new cv.Mat();
+    try {
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      cv.Laplacian(gray, lap, cv.CV_16S, 3);
+      cv.meanStdDev(lap, mean, std);
+      return std.data64F[0] * std.data64F[0];
+    } finally { [src, gray, lap, mean, std].forEach((m) => m.delete()); }
   }
 
   return {
     load,
     get ready() { return ready; },
-    detect, refine, warp, applyFilter, fullCorners, polygonArea,
+    detect, refine, warp, applyFilter, sharpness, fullCorners, polygonArea,
   };
 })();

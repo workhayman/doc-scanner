@@ -1,8 +1,9 @@
-/* Canvas / image helpers. Images are capped at 2800px on the long side:
-   sharp enough for small print, small enough that Safari on iPhone does not
-   run out of memory. */
+/* Canvas / image helpers. Photos are kept at the camera's full resolution
+   (up to 12 MP, 4032 px) and flattened pages at up to A4 / 300 dpi
+   (3508 px), which is about the most Safari on iPhone handles comfortably. */
 const Imaging = (() => {
-  const MAX_SIDE = 2800;
+  const MAX_SIDE = 4032;
+  const PAGE_SIDE = 3508;
 
   function createCanvas(w, h) {
     const c = document.createElement('canvas');
@@ -87,5 +88,5 @@ const Imaging = (() => {
     return canvas.toDataURL('image/jpeg', quality);
   }
 
-  return { MAX_SIDE, createCanvas, release, blobToCanvas, videoToCanvas, copyCanvas, rotate90, toBlob, toDataURL };
+  return { MAX_SIDE, PAGE_SIDE, createCanvas, release, blobToCanvas, videoToCanvas, copyCanvas, rotate90, toBlob, toDataURL };
 })();

@@ -113,6 +113,10 @@ svg { fill: currentColor; }
 }
 /* centred when it fits, scrollable from the first chip when it does not */
 .toolrow::before, .toolrow::after { content: ''; margin: auto; }
+.toolrow.left { padding-left: 0; padding-right: 0; }
+.toolrow.left::before { display: none; }
+#export-form .chip { background: transparent; color: inherit; }
+#export-form .chip.selected { background: var(--accent); color: #fff; }
 
 /* ---------- home ---------- */
 .empty { text-align: center; padding: 60px 24px 24px; color: var(--muted); }

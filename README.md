@@ -56,7 +56,8 @@ allow **camera** access when asked.
 1. **Scan** – the camera opens. Hold the phone above the page. A green outline
    shows the page that was found. Hold still for about a second and the picture
    is taken automatically (**Auto: On**, top right; tap it to switch to manual).
-   You can always tap the big round button yourself.
+   You can always tap the big round button yourself. The app looks at several
+   frames and keeps the sharpest one, so a little hand shake does not blur the page.
    - **HD photo** (bottom left) uses the normal iPhone camera instead. It is the
      sharpest option because it is a real photo, not a frame of the live video.
      Use it for small print.
@@ -65,12 +66,13 @@ allow **camera** access when asked.
    Drag the four blue circles if the outline is wrong.
    A magnifier helps you place them exactly. **Auto detect**, **Full image** and
    **Rotate** are there too. Tap **Next**.
-3. **Preview** – choose **Enhance** (default: removes shadows, white paper, sharp text,
-   colours kept), **Original**, **Grey** or **B&W** (smallest files, best for plain text).
+3. **Preview** – choose **Enhance** (default: removes shadows, white paper, black crisp
+   text, colours kept), **Original**, **Grey** or **B&W** (best for plain text).
    Tap **Add page**. The camera opens again for the next page.
 4. **Page list** – tap a page to re-crop, change the filter, move it, retake or delete it.
    Hold and drag a thumbnail to reorder. **Import** lets you pick photos from your library.
-5. **PDF** – type a title and tap **Create PDF**. The file is named
+5. **PDF** – type a title, pick **Sharp** (pages at full quality, about 0.3–1 MB each)
+   or **Smaller file**, and tap **Create PDF**. The file is named
    `Title-YYYY-MM-DD.pdf`. Tap **Share / Save** to send it to Files, WhatsApp, Drive,
    AirDrop or any other app. **New document** clears the pages when you are done.
 
@@ -96,7 +98,7 @@ GitHub Pages provides that.
 | `css/style.css` | Styles, safe-area handling |
 | `js/app.js` | Screen flow, camera, corner dragging, reorder, export |
 | `js/scanner.js` | Loads OpenCV, finds the page and refines its corners, flattens, filters |
-| `js/imaging.js` | Image decoding and downscaling (max 2800 px) |
+| `js/imaging.js` | Image decoding and downscaling (photos up to 4032 px, pages up to 3508 px) |
 | `js/pdf.js` | Builds the A4 PDF with jsPDF |
 | `js/db.js` | IndexedDB storage of pages |
 | `sw.js` | Service worker: caches everything for offline use |

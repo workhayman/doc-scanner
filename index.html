@@ -150,6 +150,11 @@
       <input id="doc-title" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="done" placeholder="e.g. Rental contract" maxlength="80">
       <p class="hint">File name: <span id="filename-preview"></span></p>
       <p class="hint" id="export-summary"></p>
+      <label id="quality-label">Quality</label>
+      <div class="toolrow left" id="quality-chips" role="group" aria-labelledby="quality-label">
+        <button class="chip" type="button" data-quality="high">Sharp (bigger file)</button>
+        <button class="chip" type="button" data-quality="small">Smaller file</button>
+      </div>
     </div>
 
     <div id="export-progress" hidden>

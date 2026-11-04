@@ -325,7 +325,7 @@
     if (!state.autoCapture) return;
     if (needsNewPage) { setCamStatus('Next page'); return; }
     setCamStatus(progress > 0.15 ? 'Hold still…' : 'Page found', progress > 0.15);
-    if (progress >= 1) {
+    if (progress >= 1 && !capturing) {
       lastShot = raw;
       needsNewPage = true;
       capture({ tl: raw[0], tr: raw[1], br: raw[2], bl: raw[3] }, sw);
@@ -334,13 +334,17 @@
 
   /* Take the picture. hint: corners found by the live preview, in a frame
      of width hintW, used if the full-size detection finds nothing. */
-  function capture(hint, hintW) {
+  let capturing = false;
+  async function capture(hint, hintW) {
     if (!video.videoWidth) { toast('Camera not ready yet'); return; }
-    const canvas = Imaging.videoToCanvas(video);
+    if (capturing) return;
+    capturing = true;
     const ctx = overlay.getContext('2d');
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.fillRect(0, 0, overlay.width, overlay.height);
-    setTimeout(() => ctx.clearRect(0, 0, overlay.width, overlay.height), 80);
+    let canvas;
+    try { canvas = await grabSharpest(5); } finally { capturing = false; }
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
     let scaled = null;
     if (hint) {
       const f = canvas.width / hintW;
@@ -349,6 +353,32 @@
     }
     state.queue.push({ canvas, hint: scaled });
     processQueue();
+  }
+
+  /* Hand shake blurs single video frames. Look at the next few frames and
+     keep the sharpest one (judged on a full-resolution patch in the middle). */
+  const nextVideoFrame = () => new Promise((resolve) => {
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(() => resolve());
+    else setTimeout(resolve, 45);
+  });
+  async function grabSharpest(n) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const s = Math.min(1, Imaging.MAX_SIDE / Math.max(vw, vh));
+    const best = Imaging.createCanvas(vw * s, vh * s);
+    const bctx = best.getContext('2d');
+    if (!Scanner.ready) { bctx.drawImage(video, 0, 0, best.width, best.height); return best; }
+    const pw = Math.min(640, Math.round(vw * 0.4)), ph = Math.min(640, Math.round(vh * 0.4));
+    const probe = Imaging.createCanvas(pw, ph);
+    const pctx = probe.getContext('2d', { willReadFrequently: true });
+    let bestScore = -1;
+    for (let i = 0; i < n; i++) {
+      if (i) await nextVideoFrame();
+      pctx.drawImage(video, (vw - pw) / 2, (vh - ph) / 2, pw, ph, 0, 0, pw, ph);
+      const score = Scanner.sharpness(probe);
+      if (score > bestScore) { bestScore = score; bctx.drawImage(video, 0, 0, best.width, best.height); }
+    }
+    Imaging.release(probe);
+    return best;
   }
 
   $('btn-shutter').onclick = () => {
@@ -655,6 +685,12 @@
       toast('Could not process the page: ' + e.message);
       return;
     }
+    // ~150 dpi is the least that keeps 10pt text crisp (A4 long side = 11.7 in)
+    const dpi = Math.max(cur.warped.width, cur.warped.height) / 11.7;
+    if (dpi < 150 && !state.lowResTipShown) {
+      state.lowResTipShown = true;
+      setTimeout(() => toast('Tip: for sharper text, hold the phone closer or use HD photo', 4500), 600);
+    }
     $('btn-filter-save').textContent = cur.pageId ? 'Save page' : 'Add page';
     show('filter');
     await renderFilter();
@@ -669,7 +705,13 @@
     filterCanvas.height = w.height;
     filterCanvas.getContext('2d').drawImage(w, 0, 0);
     await nextFrame();
-    Scanner.applyFilter(filterCanvas, cur.filter);
+    const res = Scanner.applyFilter(filterCanvas, cur.filter);
+    if (res !== filterCanvas) {          // small page was upscaled for crisper text
+      filterCanvas.width = res.width;
+      filterCanvas.height = res.height;
+      filterCanvas.getContext('2d').drawImage(res, 0, 0);
+      Imaging.release(res);
+    }
   }
 
   $('filter-chips').addEventListener('click', async (e) => {
@@ -691,7 +733,7 @@
     busy('Saving page…');
     await nextFrame();
     try {
-      const processed = await Imaging.toBlob(filterCanvas, 'image/jpeg', 0.9);
+      const processed = await Imaging.toBlob(filterCanvas, 'image/jpeg', 0.92);
       const thumbCanvas = Imaging.copyCanvas(filterCanvas, 320);
       const thumb = await Imaging.toBlob(thumbCanvas, 'image/jpeg', 0.7);
       Imaging.release(thumbCanvas);
@@ -748,6 +790,7 @@
     $('export-actions').hidden = false;
     $('result-actions').hidden = true;
     $('export-summary').textContent = `${state.pages.length} page${state.pages.length === 1 ? '' : 's'}, A4`;
+    renderQuality();
     updateFilenamePreview();
     show('export');
     setTimeout(() => $('doc-title').focus(), 50);
@@ -759,6 +802,20 @@
   $('doc-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btn-create-pdf').click(); } });
   $('btn-export-back').onclick = () => { show('home'); renderHome(); };
 
+  function pdfQuality() {
+    try { return localStorage.getItem('pdfQuality') === 'small' ? 'small' : 'high'; } catch (e) { return 'high'; }
+  }
+  function renderQuality() {
+    const q = pdfQuality();
+    document.querySelectorAll('#quality-chips .chip').forEach((c) => c.classList.toggle('selected', c.dataset.quality === q));
+  }
+  $('quality-chips').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    try { localStorage.setItem('pdfQuality', chip.dataset.quality); } catch (err) { /* private mode */ }
+    renderQuality();
+  });
+
   $('btn-create-pdf').onclick = async () => {
     $('doc-title').blur();
     $('export-form').hidden = true;
@@ -766,7 +823,7 @@
     $('export-actions').hidden = true;
     try {
       state.pdfName = PDFBuilder.filename($('doc-title').value);
-      state.pdfBlob = await PDFBuilder.build(state.pages, (i, n) => {
+      state.pdfBlob = await PDFBuilder.build(state.pages, pdfQuality(), (i, n) => {
         $('export-progress-text').textContent = `Building PDF… page ${i} of ${n}`;
       });
     } catch (e) {
