@@ -6,11 +6,12 @@
 
   const state = {
     pages: [],            // saved pages, in order (records from IndexedDB)
-    queue: [],            // captured images waiting to be cropped: {blob} or {canvas}
+    queue: [],            // captured images waiting to be cropped: {blob} or {canvas, hint}
     current: null,        // the page being edited (see openCrop)
     returnTo: 'camera',   // where to go after the queue is empty
     replaceId: null,      // when retaking an existing page
-    filter: localStorage.getItem('lastFilter') || 'original',
+    filter: localStorage.getItem('lastFilter') || 'enhance',
+    autoCapture: localStorage.getItem('autoCapture') !== '0',
     stream: null,
     pdfBlob: null,
     pdfName: '',
@@ -190,6 +191,9 @@
   const video = $('video');
   const overlay = $('live-overlay');
   let liveRaf = 0, lastDetect = 0, smooth = null, detectCanvas = null;
+  // auto capture: the page outline must hold still this long before the shot
+  const STEADY_MS = 1100;
+  let steadySince = 0, prevRaw = null, lastShot = null, needsNewPage = false;
 
   async function startCamera() {
     $('cam-count').textContent = state.pages.length;
@@ -201,7 +205,8 @@
     }
     setCamStatus('Starting camera…');
     const constraints = [
-      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1920 } }, audio: false },
+      // ask for the sharpest stream the camera offers (4:3, up to 12 MP)
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 4032 }, height: { ideal: 3024 } }, audio: false },
       { video: { facingMode: 'environment' }, audio: false },
       { video: true, audio: false },
     ];
@@ -227,6 +232,7 @@
 
   function stopCamera() {
     stopLiveLoop();
+    needsNewPage = false;
     if (state.stream) {
       state.stream.getTracks().forEach((t) => t.stop());
       state.stream = null;
@@ -249,6 +255,8 @@
   function startLiveLoop() {
     stopLiveLoop();
     smooth = null;
+    steadySince = 0;
+    prevRaw = null;
     const loop = (ts) => {
       liveRaf = requestAnimationFrame(loop);
       if (ts - lastDetect < 140 || !Scanner.ready || !video.videoWidth) return;
@@ -271,43 +279,101 @@
     const sw = Math.round(vw / k), sh = Math.round(vh / k);
     if (detectCanvas.width !== sw || detectCanvas.height !== sh) { detectCanvas.width = sw; detectCanvas.height = sh; }
     detectCanvas.getContext('2d').drawImage(video, 0, 0, sw, sh);
-    const corners = Scanner.detect(detectCanvas);
+    const corners = Scanner.detect(detectCanvas, { fast: true });
 
     const cw = overlay.clientWidth, ch = overlay.clientHeight;
     if (overlay.width !== cw || overlay.height !== ch) { overlay.width = cw; overlay.height = ch; }
     const ctx = overlay.getContext('2d');
     ctx.clearRect(0, 0, cw, ch);
-    if (!corners) { smooth = null; return; }
+    const now = performance.now();
+    if (!corners) {
+      smooth = null; prevRaw = null; steadySince = 0;
+      needsNewPage = false;               // page left the view: the next one may be shot
+      if (state.autoCapture && Scanner.ready) setCamStatus('Looking for a page…');
+      return;
+    }
+
+    // --- steadiness, measured in detection pixels relative to the frame size
+    const diag = Math.hypot(sw, sh);
+    const raw = ['tl', 'tr', 'br', 'bl'].map((key) => corners[key]);
+    const moved = prevRaw ? Math.max(...raw.map((p, i) => Math.hypot(p.x - prevRaw[i].x, p.y - prevRaw[i].y))) / diag : 1;
+    prevRaw = raw;
+    if (moved > 0.018) steadySince = now;
+    if (needsNewPage && lastShot) {
+      const away = Math.max(...raw.map((p, i) => Math.hypot(p.x - lastShot[i].x, p.y - lastShot[i].y))) / diag;
+      if (away > 0.08) needsNewPage = false;
+    }
+    const held = steadySince ? now - steadySince : 0;
+    const progress = state.autoCapture && !needsNewPage ? Math.min(1, held / STEADY_MS) : 0;
 
     // Map video pixels -> screen (object-fit: cover)
     const s = Math.max(cw / vw, ch / vh);
     const dx = (cw - vw * s) / 2, dy = (ch - vh * s) / 2;
-    const pts = ['tl', 'tr', 'br', 'bl'].map((key) => ({
-      x: corners[key].x * k * s + dx, y: corners[key].y * k * s + dy,
-    }));
+    const pts = raw.map((p) => ({ x: p.x * k * s + dx, y: p.y * k * s + dy }));
     if (smooth) pts.forEach((p, i) => { p.x = smooth[i].x * 0.5 + p.x * 0.5; p.y = smooth[i].y * 0.5 + p.y * 0.5; });
     smooth = pts;
 
     ctx.beginPath();
     pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
     ctx.closePath();
-    ctx.fillStyle = 'rgba(55,198,106,0.18)';
+    ctx.fillStyle = `rgba(55,198,106,${0.15 + 0.25 * progress})`;
     ctx.strokeStyle = '#37c66a';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 + 3 * progress;
     ctx.fill();
     ctx.stroke();
+
+    if (!state.autoCapture) return;
+    if (needsNewPage) { setCamStatus('Next page'); return; }
+    setCamStatus(progress > 0.15 ? 'Hold still…' : 'Page found', progress > 0.15);
+    if (progress >= 1) {
+      lastShot = raw;
+      needsNewPage = true;
+      capture({ tl: raw[0], tr: raw[1], br: raw[2], bl: raw[3] }, sw);
+    }
   }
 
-  $('btn-shutter').onclick = () => {
+  /* Take the picture. hint: corners found by the live preview, in a frame
+     of width hintW, used if the full-size detection finds nothing. */
+  function capture(hint, hintW) {
     if (!video.videoWidth) { toast('Camera not ready yet'); return; }
     const canvas = Imaging.videoToCanvas(video);
     const ctx = overlay.getContext('2d');
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, overlay.width, overlay.height);
     setTimeout(() => ctx.clearRect(0, 0, overlay.width, overlay.height), 80);
-    state.queue.push({ canvas });
+    let scaled = null;
+    if (hint) {
+      const f = canvas.width / hintW;
+      scaled = {};
+      Object.keys(hint).forEach((key) => { scaled[key] = { x: hint[key].x * f, y: hint[key].y * f }; });
+    }
+    state.queue.push({ canvas, hint: scaled });
     processQueue();
+  }
+
+  $('btn-shutter').onclick = () => {
+    if (prevRaw && detectCanvas) {
+      const r = prevRaw;
+      lastShot = r; needsNewPage = true;
+      capture({ tl: r[0], tr: r[1], br: r[2], bl: r[3] }, detectCanvas.width);
+    } else capture(null, 0);
   };
+
+  function renderAutoButton() {
+    const b = $('btn-auto');
+    b.textContent = state.autoCapture ? 'Auto: On' : 'Auto: Off';
+    b.setAttribute('aria-label', state.autoCapture ? 'Auto capture is on' : 'Auto capture is off');
+    b.setAttribute('aria-pressed', String(state.autoCapture));
+  }
+  $('btn-auto').onclick = () => {
+    state.autoCapture = !state.autoCapture;
+    try { localStorage.setItem('autoCapture', state.autoCapture ? '1' : '0'); } catch (e) { /* private mode */ }
+    renderAutoButton();
+    steadySince = 0;
+    if (!state.autoCapture) setCamStatus('');
+    toast(state.autoCapture ? 'The picture is taken when the page holds still' : 'Tap the shutter to take the picture', 1800);
+  };
+  renderAutoButton();
   $('btn-native').onclick = () => $('file-native').click();
   $('file-native').addEventListener('change', (e) => {
     const f = e.target.files[0];
@@ -335,7 +401,7 @@
       catch (e) { busy(''); toast('Could not read that image'); return processQueue(); }
       busy('');
     }
-    await openCrop(canvas, { replaceId: state.replaceId, filter: state.filter });
+    await openCrop(canvas, { replaceId: state.replaceId, filter: state.filter, hint: item.hint });
   }
 
   /* ---------------- CROP ---------------- */
@@ -357,6 +423,7 @@
       filter: opts.filter || state.filter,
       original: opts.original || null,
       corners: opts.corners || null,
+      hint: opts.hint || null,
       warped: null,
     };
     const editing = !!(state.current.pageId || state.current.replaceId);
@@ -388,7 +455,15 @@
       busy('');
       if (state.current !== cur) return;
     }
-    const found = Scanner.ready ? Scanner.detect(cur.source) : null;
+    busy('Finding page edges…');
+    await nextFrame();
+    let found = Scanner.ready ? Scanner.detect(cur.source) : null;
+    // fall back to the outline the live preview saw, sharpened on the full image
+    if (!found && cur.hint && Scanner.ready) {
+      try { found = Scanner.refine(cur.source, cur.hint, cur.source.width / 420); } catch (e) { found = cur.hint; }
+    }
+    busy('');
+    if (state.current !== cur) return;
     cur.corners = found || Scanner.fullCorners(cur.source.width, cur.source.height);
     if (!found && Scanner.ready) toast('No page edges found, drag the corners to fit');
     layoutCrop();
@@ -523,6 +598,7 @@
     state.returnTo = state.replaceId ? 'home' : state.returnTo;
     discardCurrent();
     state.queue = [];
+    needsNewPage = false;     // let auto capture shoot the same page again
     show('camera');
   };
   $('btn-crop-delete').onclick = async () => {
@@ -615,7 +691,7 @@
     busy('Saving page…');
     await nextFrame();
     try {
-      const processed = await Imaging.toBlob(filterCanvas, 'image/jpeg', 0.82);
+      const processed = await Imaging.toBlob(filterCanvas, 'image/jpeg', 0.9);
       const thumbCanvas = Imaging.copyCanvas(filterCanvas, 320);
       const thumb = await Imaging.toBlob(thumbCanvas, 'image/jpeg', 0.7);
       Imaging.release(thumbCanvas);

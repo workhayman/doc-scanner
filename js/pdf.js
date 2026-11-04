@@ -1,10 +1,11 @@
 /* Builds one A4 PDF from the processed pages, using jsPDF.
-   Each page is re-encoded as a moderately compressed JPEG so the file stays small. */
+   Each page is re-encoded as JPEG at about 210 dpi for A4, which keeps
+   small print sharp while the file stays a reasonable size. */
 const PDFBuilder = (() => {
-  const PDF_SIDE = 1700;   // px on the long side inside the PDF
+  const PDF_SIDE = 2480;   // px on the long side inside the PDF (~210 dpi on A4)
 
   function quality(filter) {
-    return filter === 'bw' ? 0.5 : filter === 'grey' ? 0.55 : 0.62;
+    return filter === 'bw' ? 0.7 : filter === 'grey' ? 0.72 : 0.78;
   }
 
   async function build(pages, onProgress) {

@@ -60,17 +60,18 @@
       <svg viewBox="0 0 24 24"><path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4l-6.3 6.3-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z"/></svg>
     </button>
     <div id="cam-status" class="pill">Starting camera…</div>
+    <button id="btn-auto" class="pill pill-btn" type="button" aria-pressed="true">Auto: On</button>
   </div>
 
   <div id="cam-error" class="cam-error" hidden>
     <p id="cam-error-text">The live camera could not be started.</p>
-    <p>Use <strong>Photo</strong> below to take a picture with the normal iPhone camera instead.</p>
+    <p>Use <strong>HD photo</strong> below to take a picture with the normal iPhone camera instead.</p>
   </div>
 
   <div class="cam-bottom">
     <button id="btn-native" class="btn-round light" type="button">
       <svg viewBox="0 0 24 24"><path d="M12 3l3 3h4a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l3-3zm0 6a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z"/></svg>
-      <span>Photo</span>
+      <span>HD photo</span>
     </button>
     <button id="btn-shutter" class="shutter" type="button" aria-label="Take picture"></button>
     <button id="btn-cam-done" class="btn-round light" type="button">
@@ -124,9 +125,10 @@
   </div>
 
   <div class="toolrow" id="filter-chips">
+    <button class="chip" type="button" data-filter="enhance">Enhance</button>
     <button class="chip" type="button" data-filter="original">Original</button>
-    <button class="chip" type="button" data-filter="grey">Greyscale</button>
-    <button class="chip" type="button" data-filter="bw">Black &amp; White</button>
+    <button class="chip" type="button" data-filter="grey">Grey</button>
+    <button class="chip" type="button" data-filter="bw">B&amp;W</button>
   </div>
 
   <footer class="bottombar one">
@@ -186,7 +188,6 @@
 <input id="file-native" type="file" accept="image/*" capture="environment" hidden>
 <input id="file-import" type="file" accept="image/*" multiple hidden>
 
-<script src="./lib/jscanify.js"></script>
 <script src="./lib/jspdf.umd.min.js"></script>
 <script src="./js/db.js"></script>
 <script src="./js/imaging.js"></script>

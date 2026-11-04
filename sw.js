@@ -16,7 +16,6 @@ const ASSETS = [
   './js/pdf.js',
   './js/app.js',
   './lib/opencv.js',
-  './lib/jscanify.js',
   './lib/jspdf.umd.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

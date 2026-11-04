@@ -7,8 +7,8 @@ Google Drive or AirDrop.
 
 - Everything runs on the phone. No server, no account, no ads, no tracking.
 - Works offline after the first load and can be added to the home screen.
-- Plain HTML, CSS and JavaScript. Edge detection by [jscanify](https://github.com/puffinsoft/jscanify)
-  + [OpenCV.js](https://docs.opencv.org/4.x/d5/d10/tutorial_js_root.html), PDF by [jsPDF](https://github.com/parallax/jsPDF).
+- Plain HTML, CSS and JavaScript. Page detection and image cleanup with
+  [OpenCV.js](https://docs.opencv.org/4.x/d5/d10/tutorial_js_root.html), PDF by [jsPDF](https://github.com/parallax/jsPDF).
 
 The app will be available at:
 
@@ -54,14 +54,20 @@ allow **camera** access when asked.
 ## 3. How to use it
 
 1. **Scan** – the camera opens. Hold the phone above the page. A green outline
-   shows the page that was found. Tap the big round button to take the picture.
-   - **Photo** (bottom left) uses the normal iPhone camera instead, at full quality.
+   shows the page that was found. Hold still for about a second and the picture
+   is taken automatically (**Auto: On**, top right; tap it to switch to manual).
+   You can always tap the big round button yourself.
+   - **HD photo** (bottom left) uses the normal iPhone camera instead. It is the
+     sharpest option because it is a real photo, not a frame of the live video.
+     Use it for small print.
    - **Done** (bottom right) goes back to the page list.
-2. **Adjust corners** – drag the four blue circles if the outline is wrong.
+2. **Adjust corners** – the corners are placed on the paper edge automatically.
+   Drag the four blue circles if the outline is wrong.
    A magnifier helps you place them exactly. **Auto detect**, **Full image** and
    **Rotate** are there too. Tap **Next**.
-3. **Preview** – choose **Original**, **Greyscale** or **Black & White**
-   (best for printed text). Tap **Add page**. The camera opens again for the next page.
+3. **Preview** – choose **Enhance** (default: removes shadows, white paper, sharp text,
+   colours kept), **Original**, **Grey** or **B&W** (smallest files, best for plain text).
+   Tap **Add page**. The camera opens again for the next page.
 4. **Page list** – tap a page to re-crop, change the filter, move it, retake or delete it.
    Hold and drag a thumbnail to reorder. **Import** lets you pick photos from your library.
 5. **PDF** – type a title and tap **Create PDF**. The file is named
@@ -89,11 +95,11 @@ GitHub Pages provides that.
 | `index.html` | All screens (home, camera, crop, preview, export) |
 | `css/style.css` | Styles, safe-area handling |
 | `js/app.js` | Screen flow, camera, corner dragging, reorder, export |
-| `js/scanner.js` | Loads OpenCV, detects edges, flattens, filters |
-| `js/imaging.js` | Image decoding and downscaling (max 2000 px) |
+| `js/scanner.js` | Loads OpenCV, finds the page and refines its corners, flattens, filters |
+| `js/imaging.js` | Image decoding and downscaling (max 2800 px) |
 | `js/pdf.js` | Builds the A4 PDF with jsPDF |
 | `js/db.js` | IndexedDB storage of pages |
 | `sw.js` | Service worker: caches everything for offline use |
 | `manifest.webmanifest` | Home-screen app settings and icons |
-| `lib/` | Vendored OpenCV.js 4.7.0, jscanify 1.4, jsPDF 2.5.2 |
+| `lib/` | Vendored OpenCV.js 4.7.0, jsPDF 2.5.2 |
 | `.github/workflows/deploy.yml` | Deploys to GitHub Pages on every push to `main` |

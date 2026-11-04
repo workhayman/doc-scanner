@@ -1,7 +1,8 @@
-/* Canvas / image helpers. Everything is kept small (max ~2000px) so
-   Safari on iPhone does not run out of memory. */
+/* Canvas / image helpers. Images are capped at 2800px on the long side:
+   sharp enough for small print, small enough that Safari on iPhone does not
+   run out of memory. */
 const Imaging = (() => {
-  const MAX_SIDE = 2000;
+  const MAX_SIDE = 2800;
 
   function createCanvas(w, h) {
     const c = document.createElement('canvas');
